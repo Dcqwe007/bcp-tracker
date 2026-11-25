@@ -42,6 +42,10 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .brand h1 { margin: 0; font-size: 17px; letter-spacing: -.3px; }
 .brand p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .brand-badge { margin-left: 7px; padding: 3px 8px; border-radius: 20px; color: #047857; background: #d1fae5; font-size: 10px; font-weight: 800; vertical-align: middle; }
+.connection-pill { display: inline-block; margin-top: 4px; padding: 3px 7px; border-radius: 20px; color: var(--muted); background: var(--surface-muted); font-size: 9px; font-weight: 800; }
+.connection-pill.connected { color: #047857; background: #d1fae5; }
+.connection-pill.connecting { color: #b45309; background: #fef3c7; }
+.connection-pill.offline { color: #b91c1c; background: #fee2e2; }
 .nav { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); }
 .nav button, .mobile-nav button { border: 0; border-radius: 10px; color: var(--muted); background: transparent; padding: 9px 11px; font-weight: 700; font-size: 11px; white-space: nowrap; }
 .nav button.active, .mobile-nav button.active { background: var(--surface); color: var(--accent); box-shadow: 0 1px 5px #13213a14; }

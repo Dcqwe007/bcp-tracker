@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = 'bcp_readiness_sites_v2';
   const THEME_KEY = 'bcp_readiness_theme_v2';
+  const API_URL = 'api/sites.php';
   const clusters = ['Noel', 'Bel', 'VisMin', 'AJ'];
   const months = ['March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const monthNumbers = Object.fromEntries(months.map((month, index) => [month, index + 3]));
@@ -15,6 +16,8 @@
     ['mop', 'How-to Guide']
   ];
   const app = document.getElementById('app');
+  let databaseState = window.location.protocol === 'file:' ? 'browser' : 'connecting';
+  let storageMode = 'browser';
   let sites = readSites();
   let dark = readTheme();
   let currentView = 'analytics';
@@ -27,6 +30,7 @@
   let calendarMonth = 10;
   let toastTimer;
   let toastMessage = '';
+  let saveQueue = Promise.resolve();
 
   function readSites() {
     try {
@@ -58,16 +62,64 @@
     })[char]);
   }
 
-  function saveSites(updated) {
-    sites = updated;
+  async function requestDatabase(url, options) {
+    const response = await fetch(url, options);
+    let payload;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sites));
+      payload = await response.json();
     } catch (error) {
-      console.error('Unable to save site data:', error);
-      render();
-      showToast('Could not save changes in this browser. Check storage permissions.');
+      throw new Error('The XAMPP API returned an invalid response.');
+    }
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `XAMPP request failed (${response.status}).`);
+    }
+    return payload;
+  }
+
+  function writeDatabaseSites(updated) {
+    return requestDatabase(API_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ sites: updated })
+    });
+  }
+
+  async function saveSites(updated) {
+    if (databaseState === 'connecting') {
+      showToast('Wait for the XAMPP database connection to finish.');
       return false;
     }
+
+    const previous = sites;
+    sites = updated;
+    render();
+
+    if (storageMode === 'database') {
+      const write = saveQueue.then(() => writeDatabaseSites(updated));
+      saveQueue = write.catch(() => undefined);
+      try {
+        await write;
+        databaseState = 'connected';
+      } catch (error) {
+        console.error('Unable to save site data to XAMPP:', error);
+        if (sites === updated) sites = previous;
+        databaseState = 'offline';
+        render();
+        showToast('XAMPP save failed. Changes were reverted; check Apache, MySQL, and the database setup.');
+        return false;
+      }
+    } else {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sites));
+      } catch (error) {
+        console.error('Unable to save site data:', error);
+        if (sites === updated) sites = previous;
+        render();
+        showToast('Could not save changes in this browser. Check storage permissions.');
+        return false;
+      }
+    }
+
     try {
       if ('BroadcastChannel' in window) {
         const channel = new BroadcastChannel('bcp_realtime_sync_channel');
@@ -79,6 +131,37 @@
     }
     render();
     return true;
+  }
+
+  async function connectToDatabase() {
+    if (window.location.protocol === 'file:') return;
+
+    try {
+      const response = await requestDatabase(API_URL, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!Array.isArray(response.sites)) {
+        throw new Error('The XAMPP API did not return a sites list.');
+      }
+
+      if (response.sites.length === 0) {
+        sites = window.initialSitesData.map((site) => ({ ...site }));
+        await writeDatabaseSites(sites);
+      } else {
+        sites = response.sites;
+      }
+
+      storageMode = 'database';
+      databaseState = 'connected';
+      render();
+      showToast('Connected to XAMPP MySQL.');
+    } catch (error) {
+      console.error('Unable to connect to XAMPP:', error);
+      storageMode = 'browser';
+      databaseState = 'offline';
+      render();
+      showToast('XAMPP is not connected. Check Apache/MySQL, api/config.php, and import api/schema.sql.');
+    }
   }
 
   function showToast(message) {
@@ -165,9 +248,12 @@
     const search = `<input class="search" id="searchBox" placeholder="Find site, CRQ, city..." value="${escapeHtml(filters.search)}" aria-label="Search sites">`;
     const nav = views.map(([id, label]) => `<button class="${currentView === id ? 'active' : ''}" data-action="view" data-view="${id}">${label}</button>`).join('');
     const mobileNav = views.map(([id, label]) => `<button class="${currentView === id ? 'active' : ''}" data-action="view" data-view="${id}">${label}</button>`).join('');
+    const connectionLabel = databaseState === 'connected' ? 'XAMPP · Connected' :
+      databaseState === 'connecting' ? 'XAMPP · Connecting' :
+        databaseState === 'offline' ? 'XAMPP · Offline' : 'Browser Storage';
     return `<header class="topbar"><div class="top-inner">
       <div class="top-row">
-        <div class="brand"><div class="brand-mark">BCP</div><div><h1>BCP Site Tracker <span class="brand-badge">${sites.length} Sites</span></h1><p>Server &amp; Network Business Continuity Readiness</p></div></div>
+        <div class="brand"><div class="brand-mark">BCP</div><div><h1>BCP Site Tracker <span class="brand-badge">${sites.length} Sites</span></h1><p>Server &amp; Network Business Continuity Readiness</p><span class="connection-pill ${databaseState}">${connectionLabel}</span></div></div>
         <nav class="nav" aria-label="Dashboard views">${nav}</nav>
         <div class="actions">${search}
           <button class="button primary" data-action="import"><span class="wide-label">Import CSV</span> ⤒</button>
@@ -393,7 +479,7 @@
     else if (currentView === 'timeline') view = renderTimeline(list);
     else view = renderGuide();
     app.innerHTML = `<div class="shell">${renderHeader()}<main class="main">${renderMetrics(list, metrics)}${renderFilters(list)}${view}</main>
-      <footer class="footer"><div class="footer-inner"><span><strong>IT BCP READINESS DASHBOARD</strong> · Browser-only local application</span><span>Clusters: Noel · Bel · VisMin · AJ</span></div></footer>${renderModal()}</div>`;
+      <footer class="footer"><div class="footer-inner"><span><strong>IT BCP READINESS DASHBOARD</strong> · <span>${storageMode === 'database' ? 'XAMPP MySQL storage' : 'Browser storage'}</span></span><span>Clusters: Noel · Bel · VisMin · AJ</span></div></footer>${renderModal()}</div>`;
     const track = document.getElementById('trackFilter');
     const status = document.getElementById('statusFilter');
     if (track) track.value = filters.track;
@@ -403,14 +489,14 @@
     renderToast();
   }
 
-  function updateSiteStatus(id, track, status) {
+  async function updateSiteStatus(id, track, status) {
     const updated = sites.map((site) => {
       if (site.id !== id) return site;
       const next = { ...site, [track === 'network' ? 'networkStatus' : 'serverStatus']: status };
       next.overallStatus = overallStatus(next);
       return next;
     });
-    if (saveSites(updated)) showToast(`${track === 'network' ? 'Network' : 'Server'} status updated to ${status}`);
+    if (await saveSites(updated)) showToast(`${track === 'network' ? 'Network' : 'Server'} status updated to ${status}`);
   }
 
   function parseCsv(text) {
@@ -439,7 +525,7 @@
 
   function importCsv(file) {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const rows = parseCsv(String(reader.result || ''));
         const validClusters = new Set(clusters);
@@ -470,7 +556,7 @@
           site.overallStatus = overallStatus(site);
           return site;
         });
-        if (saveSites(imported)) showToast(`Imported ${imported.length} sites from CSV.`);
+        if (await saveSites(imported)) showToast(`Imported ${imported.length} sites from CSV.`);
       } catch (error) {
         console.error('CSV import failed:', error);
         showToast(error.message || 'Could not read the CSV file.');
@@ -506,7 +592,7 @@
     }
   }
 
-  app.addEventListener('click', (event) => {
+  app.addEventListener('click', async (event) => {
     const target = event.target.closest('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
@@ -519,7 +605,7 @@
     else if (action === 'export') exportCsv();
     else if (action === 'reset') {
       if (window.confirm('Reset all sites to the original 48-site template?')) {
-        if (saveSites(window.initialSitesData.map((site) => ({ ...site })))) {
+        if (await saveSites(window.initialSitesData.map((site) => ({ ...site })))) {
           showToast('Site data restored to the original template.');
         }
       }
@@ -544,16 +630,16 @@
       if (!site) return;
       const key = target.dataset.track === 'network' ? 'networkStatus' : 'serverStatus';
       const sequence = ['Completed', 'In Progress', 'Not Started'];
-      updateSiteStatus(site.id, target.dataset.track, sequence[(sequence.indexOf(site[key]) + 1) % sequence.length]);
+      await updateSiteStatus(site.id, target.dataset.track, sequence[(sequence.indexOf(site[key]) + 1) % sequence.length]);
     } else if (action === 'date') { selectedDate = target.dataset.date; render(); }
     else if (action === 'month') { calendarMonth = Math.min(11, Math.max(2, calendarMonth + Number(target.dataset.delta))); render(); }
     else if (action === 'calendar-toggle') {
       const site = sites.find((item) => item.id === target.dataset.id);
-      if (site) updateSiteStatus(site.id, target.dataset.track, site[`${target.dataset.track}Status`] === 'Completed' ? 'In Progress' : 'Completed');
+      if (site) await updateSiteStatus(site.id, target.dataset.track, site[`${target.dataset.track}Status`] === 'Completed' ? 'In Progress' : 'Completed');
     } else if (action === 'advance') {
       const site = sites.find((item) => item.id === target.dataset.id);
       if (site) {
-        if (site.serverStatus !== 'Completed') updateSiteStatus(site.id, 'server', 'Completed');
+        if (site.serverStatus !== 'Completed') await updateSiteStatus(site.id, 'server', 'Completed');
         else openSite(site.id);
       }
     } else if (action === 'close') editingSite = null, render();
@@ -591,7 +677,7 @@
     render();
   });
 
-  app.addEventListener('submit', (event) => {
+  app.addEventListener('submit', async (event) => {
     if (event.target.id !== 'siteForm' || !editingSite) return;
     event.preventDefault();
     const formData = new FormData(event.target);
@@ -600,7 +686,7 @@
     editingSite.serverMonthNum = editingSite.serverDate ? Number(editingSite.serverDate.slice(5,7)) : editingSite.serverMonthNum;
     editingSite.overallStatus = overallStatus(editingSite);
     const savedName = editingSite.site;
-    const saved = saveSites(sites.map((site) => site.id === editingSite.id ? { ...editingSite } : site));
+    const saved = await saveSites(sites.map((site) => site.id === editingSite.id ? { ...editingSite } : site));
     editingSite = null;
     render();
     if (saved) showToast(`Saved updates for ${savedName}.`);
@@ -631,4 +717,5 @@
   }
 
   render();
+  connectToDatabase();
 })();
