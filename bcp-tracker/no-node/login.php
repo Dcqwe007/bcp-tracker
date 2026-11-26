@@ -18,14 +18,14 @@ if (isBcpAuthenticated()) {
   <meta name="theme-color" content="#f5f7fb">
   <title>Sign in · BCP Site Tracker</title>
   <link rel="icon" type="image/png" href="assets/concentrix-logo.png?v=1">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body class="login-page">
   <main class="login-shell">
     <section class="login-card">
       <img class="login-logo" src="assets/concentrix-logo.png" alt="Concentrix logo">
-      <h1 id="loginTitle">BCP Site Tracker</h1>
-      <p id="loginSubtitle" class="login-subtitle">Checking your XAMPP connection…</p>
+      <h1 id="loginTitle">Sign in</h1>
+      <p id="loginSubtitle" class="login-subtitle">Sign in to open the BCP Site Tracker.</p>
       <p id="loginStatus" class="login-status" role="status">Please wait.</p>
       <div id="loginError" class="login-alert" role="alert" hidden></div>
       <form id="loginForm" class="login-form" hidden>
@@ -33,9 +33,14 @@ if (isBcpAuthenticated()) {
         <input id="loginUsername" name="username" autocomplete="username" minlength="3" maxlength="80" required>
         <label for="loginPassword">Password</label>
         <input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
-        <p id="passwordHelp" class="login-help" hidden>For the first setup, use at least 12 characters. This shared login is stored in MySQL as a password hash.</p>
+        <p id="passwordHelp" class="login-help" hidden>Use at least 12 characters. Your password is stored securely as a hash.</p>
         <button id="loginSubmit" class="button primary" type="submit">Sign in</button>
       </form>
+      <div id="loginDivider" class="login-divider" aria-hidden="true"><span>or</span></div>
+      <p id="loginActions" class="login-actions">
+        <a id="createAccountLink" class="create-account-button" href="login.php?create=1">Create account</a>
+        <a id="signInLink" href="login.php" hidden>Back to sign in</a>
+      </p>
       <p class="login-footer">For local XAMPP use. Do not expose this app to the public internet.</p>
     </section>
   </main>
@@ -51,7 +56,13 @@ if (isBcpAuthenticated()) {
       const password = document.getElementById('loginPassword');
       const passwordHelp = document.getElementById('passwordHelp');
       const submit = document.getElementById('loginSubmit');
-      let configured = false;
+      const loginActions = document.getElementById('loginActions');
+      const loginDivider = document.getElementById('loginDivider');
+      const createAccountLink = document.getElementById('createAccountLink');
+      const signInLink = document.getElementById('signInLink');
+      const createRequested = new URLSearchParams(window.location.search).get('create') === '1';
+      const accountCreated = new URLSearchParams(window.location.search).get('account-created') === '1';
+      let registrationMode = false;
 
       async function readResponse(response) {
         let payload;
@@ -74,16 +85,24 @@ if (isBcpAuthenticated()) {
             window.location.replace('index.php');
             return;
           }
-          configured = payload.configured;
-          title.textContent = configured ? 'Sign in' : 'Set up the shared login';
-          subtitle.textContent = configured
-            ? 'Sign in to open the BCP Site Tracker.'
-            : 'Create the shared account used to access this local dashboard.';
-          submit.textContent = configured ? 'Sign in' : 'Create login';
-          password.autocomplete = configured ? 'current-password' : 'new-password';
-          password.minLength = configured ? 1 : 12;
-          passwordHelp.hidden = configured;
-          status.hidden = true;
+          registrationMode = createRequested;
+          title.textContent = registrationMode ? 'Create your account' : 'Sign in';
+          subtitle.textContent = registrationMode
+            ? 'Create an account to access the BCP Site Tracker.'
+            : 'Sign in to open the BCP Site Tracker.';
+          submit.textContent = registrationMode ? 'Create account' : 'Sign in';
+          password.autocomplete = registrationMode ? 'new-password' : 'current-password';
+          password.minLength = registrationMode ? 12 : 1;
+          passwordHelp.hidden = !registrationMode;
+          loginDivider.hidden = registrationMode;
+          createAccountLink.hidden = registrationMode;
+          signInLink.hidden = !registrationMode;
+          if (accountCreated) {
+            status.textContent = 'Account created. Sign in with your username and password.';
+            status.hidden = false;
+          } else {
+            status.hidden = true;
+          }
           form.hidden = false;
         } catch (error) {
           status.hidden = true;
@@ -96,24 +115,24 @@ if (isBcpAuthenticated()) {
         event.preventDefault();
         errorBox.hidden = true;
         submit.disabled = true;
-        submit.textContent = configured ? 'Signing in…' : 'Setting up…';
+        submit.textContent = registrationMode ? 'Creating account…' : 'Signing in…';
         try {
           const response = await fetch('api/auth.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
-              action: configured ? 'login' : 'setup',
+              action: registrationMode ? 'register' : 'login',
               username: username.value,
               password: password.value
             })
           });
           await readResponse(response);
-          window.location.replace('index.php');
+          window.location.replace(registrationMode ? 'login.php?account-created=1' : 'index.php');
         } catch (error) {
           errorBox.textContent = error.message || 'Could not sign in.';
           errorBox.hidden = false;
           submit.disabled = false;
-          submit.textContent = configured ? 'Sign in' : 'Create login';
+          submit.textContent = registrationMode ? 'Create account' : 'Sign in';
         }
       });
 
