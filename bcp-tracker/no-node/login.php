@@ -18,7 +18,7 @@ if (isBcpAuthenticated()) {
   <meta name="theme-color" content="#f5f7fb">
   <title>Sign in · BCP Site Tracker</title>
   <link rel="icon" type="image/png" href="assets/concentrix-logo.png?v=1">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body class="login-page">
   <main class="login-shell">
