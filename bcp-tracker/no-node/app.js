@@ -13,7 +13,7 @@
     ['calendar', 'Calendar'],
     ['kanban', 'Status Board'],
     ['timeline', 'Timeline'],
-    ['mop', 'How-to Guide']
+    ['mop', 'Scope & Test']
   ];
   const app = document.getElementById('app');
   let databaseState = window.location.protocol === 'file:' ? 'browser' : 'connecting';
@@ -26,6 +26,7 @@
   let sortBy = 'cluster';
   let sortDirection = 1;
   let editingSite = null;
+  let schedulingDate = null;
   let selectedDate = '2026-11-22';
   let calendarMonth = 10;
   let toastTimer;
@@ -64,6 +65,10 @@
 
   async function requestDatabase(url, options) {
     const response = await fetch(url, options);
+    if (response.status === 401 && window.location.protocol !== 'file:') {
+      window.location.replace('login.php');
+      throw new Error('Your sign-in session expired. Please sign in again.');
+    }
     let payload;
     try {
       payload = await response.json();
@@ -248,17 +253,19 @@
     const search = `<input class="search" id="searchBox" placeholder="Find site, CRQ, city..." value="${escapeHtml(filters.search)}" aria-label="Search sites">`;
     const nav = views.map(([id, label]) => `<button class="${currentView === id ? 'active' : ''}" data-action="view" data-view="${id}">${label}</button>`).join('');
     const mobileNav = views.map(([id, label]) => `<button class="${currentView === id ? 'active' : ''}" data-action="view" data-view="${id}">${label}</button>`).join('');
+    const signOut = window.location.protocol === 'file:' ? '' : '<button class="button quiet" data-action="logout" title="Sign out" aria-label="Sign out"><span class="wide-label">Sign out</span><span class="compact-label" aria-hidden="true">↪</span></button>';
     const connectionLabel = databaseState === 'connected' ? 'XAMPP · Connected' :
       databaseState === 'connecting' ? 'XAMPP · Connecting' :
         databaseState === 'offline' ? 'XAMPP · Offline' : 'Browser Storage';
     return `<header class="topbar"><div class="top-inner">
       <div class="top-row">
-        <div class="brand"><div class="brand-mark">BCP</div><div><h1>BCP Site Tracker <span class="brand-badge">${sites.length} Sites</span></h1><p>Server &amp; Network Business Continuity Readiness</p><span class="connection-pill ${databaseState}">${connectionLabel}</span></div></div>
+        <div class="brand"><img class="brand-logo" src="assets/concentrix-logo.png" alt="Concentrix logo"><div><h1>BCP Site Tracker <span class="brand-badge">${sites.length} Sites</span></h1><p>Server &amp; Network Business Continuity Readiness</p><span class="connection-pill ${databaseState}">${connectionLabel}</span></div></div>
         <nav class="nav" aria-label="Dashboard views">${nav}</nav>
         <div class="actions">${search}
           <button class="button primary" data-action="import"><span class="wide-label">Import CSV</span> ⤒</button>
           <button class="button quiet" data-action="export" title="Export CSV">↓</button>
           <button class="button quiet" data-action="reset" title="Reset baseline">↺</button>
+          ${signOut}
           <button class="button quiet" data-action="theme" title="Toggle color theme">${dark ? '☀' : '☾'}</button>
         </div>
       </div>
@@ -395,25 +402,40 @@
     return events.sort((a, b) => a.date.localeCompare(b.date));
   }
 
+  function getAvailableScheduleSlots() {
+    return sites.flatMap((site) => ['network', 'server']
+      .filter((track) => !site[`${track}Date`] && site[`${track}Status`] !== 'Completed')
+      .map((track) => ({ site, track })));
+  }
+
   function renderCalendar(list) {
     const first = new Date(2026, calendarMonth, 1).getDay();
     const days = new Date(2026, calendarMonth + 1, 0).getDate();
     const dateCells = Array.from({ length: first }, () => '<div></div>');
+    const calendarEvents = getEvents(list);
+    const allEvents = getEvents(sites);
     for (let day = 1; day <= days; day += 1) {
       const date = `2026-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const events = getEvents(list).filter((event) => event.date === date);
+      const events = calendarEvents.filter((event) => event.date === date);
       dateCells.push(`<button class="day ${selectedDate === date ? 'selected' : ''}" data-action="date" data-date="${date}"><span class="day-num">${day}</span>${events.slice(0, 2).map((event) => `<div class="event-label">${escapeHtml(event.track)} · ${escapeHtml(event.site.site.split(',')[0])}</div><div class="event-dot ${event.track === 'Server' ? 'server' : ''}"></div>`).join('')}${events.length > 2 ? `<div class="event-label">+${events.length - 2} more</div>` : ''}</button>`);
     }
-    const events = getEvents(list).filter((event) => event.date === selectedDate);
+    const events = calendarEvents.filter((event) => event.date === selectedDate);
+    const dateHasEvents = allEvents.some((event) => event.date === selectedDate);
+    const availableSlots = getAvailableScheduleSlots();
+    const scheduleDateIsValid = selectedDate >= '2026-03-01' && selectedDate <= '2026-12-31';
+    const canSchedule = scheduleDateIsValid && availableSlots.length > 0;
+    const scheduleHint = !availableSlots.length
+      ? 'No unscheduled site tracks are available.'
+      : (dateHasEvents ? 'You can add another schedule to this date.' : 'You can add a schedule to this date.');
     const monthTitle = new Date(2026, calendarMonth, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const calendarEvents = events.length ? events.map((event) => `<div class="event-card" data-action="edit" data-id="${escapeHtml(event.site.id)}">
+    const eventCards = events.length ? events.map((event) => `<div class="event-card" data-action="edit" data-id="${escapeHtml(event.site.id)}">
       <span class="tag ${event.track === 'Network' ? '' : 'Bel'}">${event.track} BCP</span><h4>${escapeHtml(event.site.site)}</h4><p>${escapeHtml(event.crq)} · ${escapeHtml(event.status)}</p><p>${escapeHtml(event.remarks || 'Standard MOP switching executed')}</p>
       <button class="button" data-action="calendar-toggle" data-id="${escapeHtml(event.site.id)}" data-track="${event.track.toLowerCase()}">${event.status === 'Completed' ? 'Mark In Progress' : 'Mark Completed'}</button></div>`).join('') : '<div class="empty">No failovers on this date.</div>';
     return `<div class="calendar-layout"><section class="panel">
-      <div class="section-heading"><div><h2>Live Failover Execution Calendar</h2><p>${getEvents(list).length} events tracked across sites</p></div>
+      <div class="section-heading"><div><h2>Live Failover Execution Calendar</h2><p>${calendarEvents.length} events tracked across sites</p></div>
       <div class="quick-row"><button class="button" data-action="month" data-delta="-1" ${calendarMonth <= 2 ? 'disabled' : ''}>‹</button><strong>${monthTitle}</strong><button class="button" data-action="month" data-delta="1" ${calendarMonth >= 11 ? 'disabled' : ''}>›</button></div></div>
       <div class="calendar-grid">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day) => `<div class="weekday">${day}</div>`).join('')}${dateCells.join('')}</div>
-    </section><section class="panel"><div class="section-heading"><div><h2>Failovers on ${escapeHtml(selectedDate)}</h2><p>${events.length} scheduled or recorded</p></div></div>${calendarEvents}</section></div>`;
+    </section><section class="panel"><div class="section-heading"><div><h2>Schedules on ${escapeHtml(selectedDate)}</h2><p>${events.length} scheduled or recorded</p></div><button class="button primary" data-action="schedule-open" ${canSchedule ? '' : 'disabled'}>Add schedule</button></div><p class="schedule-hint">${escapeHtml(scheduleHint)}</p>${eventCards}</section></div>`;
   }
 
   function boardGroup(list) {
@@ -442,18 +464,58 @@
 
   function renderGuide() {
     const procedures = window.bcpMethodOfProcedures || {};
+    const network = procedures.network || {};
+    const router = network.router || {};
+    const firewall = network.firewall || {};
+    const coreSwitch = network.coreSwitch || {};
+    const networkTests = network.testingChecklist || {};
     const server = procedures.server || {};
+    const architecture = server.architecture || {};
     const commands = Array.isArray(server.testingChecklist) ? server.testingChecklist : [];
-    return `<section class="panel" style="margin-bottom:14px"><h2>Step-by-Step BCP Method of Procedure</h2><p class="metric-sub">Standard operating procedures, failover sequences, and verification guidance</p></section>
-      <div class="guide-grid">
-        <section class="panel"><h2>Network Failover Sequence (Router FO)</h2><div class="guide-step"><strong>Stage 1 (Saturday):</strong> Load Balanced → MK2. Operate the MK2 circuit for the day.</div><div class="guide-step"><strong>Stage 2 (Sunday):</strong> MK2 → ALA. Switch to the secondary circuit for the day.</div><div class="guide-step"><strong>Stage 3 (Monday):</strong> ALA → Load Balanced. Restore normal dual-circuit balancing.</div><div class="guide-step"><strong>Pre-test:</strong> Run ping and trace on key tools to establish baseline latency and obtain Operations sign-off.</div><div class="guide-step"><strong>Post-test:</strong> Compare trace results after failover and confirm routing without packet loss.</div></section>
-        <section class="panel"><h2>Server Switching Hierarchy (AD, DNS &amp; DHCP)</h2><div class="guide-step"><strong>Three-tier redundancy:</strong><br>Localized Server → Secondary (MK2) → Tertiary (ALA)</div><p class="metric-sub">Configuration varies by site depending on local domain controllers and connections to Tera/ALA.</p><h3>Verification commands</h3>
-          ${commands.map((item) => `<div class="command"><div><strong>${escapeHtml(item.tool)}</strong><br><span class="metric-sub">${escapeHtml(item.expected)}</span><br><code>${escapeHtml(item.command)}</code></div><button class="button" data-action="copy" data-copy="${escapeHtml(item.command)}">Copy</button></div>`).join('')}
-        </section></div>`;
+    const checklist = (items) => `<ul class="guide-checklist">${(items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    return `<section class="panel" style="margin-bottom:14px"><h2>Scope &amp; Test</h2><p class="metric-sub">BCP failover scope, impact assessments, and verification checks</p></section>
+      <div class="guide-grid scope-test-grid">
+        <section class="panel">
+          <div class="mop-band network-band">Scope</div>
+          <section class="mop-section">
+            <h3>Network scope</h3>
+            <h4>${escapeHtml(router.title || 'Network Router FO method of procedure')}</h4>
+            <p class="guide-flow">${escapeHtml(router.pattern || '')}</p>
+            <h4>Example</h4>
+            <ol class="schedule-list">${(router.scheduleExample || []).map((step) => `<li><span>${escapeHtml(step.day)}</span><strong>${escapeHtml(step.action)}</strong></li>`).join('')}</ol>
+            <div class="guide-note"><strong>Objective:</strong> ${escapeHtml(router.objective || '')}<br><strong>Impact Assessment:</strong> ${escapeHtml(router.impactAssessment || '')}</div>
+          </section>
+          <div class="guide-subgrid">
+            <section class="guide-step"><h3>${escapeHtml(firewall.title || 'Firewall FO method of procedure')}</h3><p>${escapeHtml(firewall.scope || '')}</p><p><strong>Impact Assessment:</strong> ${escapeHtml(firewall.impactAssessment || '')}</p></section>
+            <section class="guide-step"><h3>${escapeHtml(coreSwitch.title || 'Core Switch FO method of procedure')}</h3><p>${escapeHtml(coreSwitch.pattern || '')}</p><p><strong>Impact Assessment:</strong> ${escapeHtml(coreSwitch.impactAssessment || '')}</p></section>
+          </div>
+          <section class="mop-section">
+            <h3>Server scope</h3>
+            <h4>Server switching method of procedure</h4>
+            <p class="guide-flow">${escapeHtml(architecture.pattern || '')}</p>
+            <h4>Example</h4>
+            <div class="guide-step">${escapeHtml(architecture.adDns || '')}</div>
+            <div class="guide-step">${escapeHtml(architecture.dhcp || '')}</div>
+            <div class="guide-note">${escapeHtml(architecture.note || '')}</div>
+          </section>
+        </section>
+        <section class="panel">
+          <div class="mop-band server-band">Test</div>
+          <section class="mop-section">
+            <h3>Network tests</h3>
+            <h4>Pre Test before Failover</h4>${checklist(networkTests.preTest)}
+            <h4>Post Test after Failover</h4>${checklist(networkTests.postTest)}
+          </section>
+          <section class="mop-section">
+            <h3>Server tests</h3>
+            ${commands.map((item) => `<div class="command"><div><strong>${escapeHtml(item.tool)}</strong><br><span class="metric-sub">${escapeHtml(item.expected)}</span><br><code>${escapeHtml(item.command)}</code></div><button class="button" data-action="copy" data-copy="${escapeHtml(item.command)}">Copy</button></div>`).join('')}
+          </section>
+        </section>
+      </div>`;
   }
 
   function renderModal() {
-    if (!editingSite) return '';
+    if (!editingSite) return schedulingDate ? renderScheduleModal() : '';
     const site = editingSite;
     const input = (label, key, type, full) => `<div class="field ${full ? 'full' : ''}"><label for="field-${key}">${label}</label><input id="field-${key}" name="${key}" type="${type || 'text'}" value="${escapeHtml(site[key] || '')}"></div>`;
     const select = (label, key) => `<div class="field"><label for="field-${key}">${label}</label><select id="field-${key}" name="${key}">${['Completed','In Progress','Not Started'].map((status) => `<option ${site[key] === status ? 'selected' : ''}>${status}</option>`).join('')}</select></div>`;
@@ -464,6 +526,21 @@
         <div class="field full"><strong>Network BCP</strong></div>${select('Status','networkStatus')}${input('Failover date','networkDate','date')}${input('Approved CRQ','networkCRQ')}${input('Remarks','networkRemarks','text',true)}
         <div class="field full"><strong>Server BCP</strong></div>${select('Status','serverStatus')}${input('Failover date','serverDate','date')}${input('Approved CRQ','serverCRQ')}${input('Remarks','serverRemarks','text',true)}
       </div><div class="modal-foot"><button type="button" class="button" data-action="close">Cancel</button><button type="submit" class="button primary">Save Changes</button></div></form>
+    </section></div>`;
+  }
+
+  function renderScheduleModal() {
+    const availableSlots = getAvailableScheduleSlots();
+    const options = availableSlots.map(({ site, track }) => `<option value="${escapeHtml(site.id)}|${track}">${escapeHtml(site.site)} · ${escapeHtml(site.cluster)} · ${track === 'network' ? 'Network' : 'Server'} BCP</option>`).join('');
+    return `<div class="modal-backdrop" data-action="close-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head"><h2 id="modalTitle">Add a failover schedule</h2><button class="button" data-action="close">Close</button></div>
+      <form id="scheduleForm"><div class="form-grid">
+        <div class="field full"><label for="schedule-slot">Available site and track</label><select id="schedule-slot" name="slot" required><option value="">Choose a site and track</option>${options}</select></div>
+        <div class="field full"><label for="schedule-date">Schedule date</label><input id="schedule-date" name="date" type="date" value="${escapeHtml(schedulingDate)}" min="2026-03-01" max="2026-12-31" required></div>
+        <div class="field full"><label for="schedule-crq">Approved CRQ (optional)</label><input id="schedule-crq" name="crq" type="text" maxlength="255"></div>
+        <div class="field full"><label for="schedule-remarks">Notes (optional)</label><input id="schedule-remarks" name="remarks" type="text" maxlength="5000"></div>
+        ${availableSlots.length ? '' : '<p class="field full">All site tracks already have a schedule or are completed.</p>'}
+      </div><div class="modal-foot"><button type="button" class="button" data-action="close">Cancel</button><button type="submit" class="button primary" ${availableSlots.length ? '' : 'disabled'}>Save schedule</button></div></form>
     </section></div>`;
   }
 
@@ -586,6 +663,7 @@
   function openSite(id) {
     const site = sites.find((item) => item.id === id);
     if (site) {
+      schedulingDate = null;
       editingSite = { ...site };
       render();
       document.getElementById('field-site').focus();
@@ -597,6 +675,19 @@
     if (!target) return;
     const action = target.dataset.action;
     if (action === 'view') { currentView = target.dataset.view; render(); }
+    else if (action === 'logout') {
+      try {
+        await requestDatabase('api/auth.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ action: 'logout' })
+        });
+        window.location.replace('login.php');
+      } catch (error) {
+        console.error('Unable to sign out:', error);
+        showToast(error.message || 'Could not sign out.');
+      }
+    }
     else if (action === 'theme') {
       dark = !dark;
       try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch (error) { console.error('Unable to save theme:', error); }
@@ -633,6 +724,7 @@
       await updateSiteStatus(site.id, target.dataset.track, sequence[(sequence.indexOf(site[key]) + 1) % sequence.length]);
     } else if (action === 'date') { selectedDate = target.dataset.date; render(); }
     else if (action === 'month') { calendarMonth = Math.min(11, Math.max(2, calendarMonth + Number(target.dataset.delta))); render(); }
+    else if (action === 'schedule-open') { schedulingDate = selectedDate; render(); }
     else if (action === 'calendar-toggle') {
       const site = sites.find((item) => item.id === target.dataset.id);
       if (site) await updateSiteStatus(site.id, target.dataset.track, site[`${target.dataset.track}Status`] === 'Completed' ? 'In Progress' : 'Completed');
@@ -642,8 +734,8 @@
         if (site.serverStatus !== 'Completed') await updateSiteStatus(site.id, 'server', 'Completed');
         else openSite(site.id);
       }
-    } else if (action === 'close') editingSite = null, render();
-    else if (action === 'close-backdrop' && event.target === target) editingSite = null, render();
+    } else if (action === 'close') editingSite = null, schedulingDate = null, render();
+    else if (action === 'close-backdrop' && event.target === target) editingSite = null, schedulingDate = null, render();
     else if (action === 'copy') {
       const text = target.dataset.copy;
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => showToast('Command copied.')).catch((error) => { console.error('Clipboard copy failed:', error); showToast('Could not copy. Select and copy the command manually.'); });
@@ -678,6 +770,52 @@
   });
 
   app.addEventListener('submit', async (event) => {
+    if (event.target.id === 'scheduleForm' && schedulingDate) {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      const [siteId, track] = String(formData.get('slot') || '').split('|');
+      const date = String(formData.get('date') || '');
+      const dateParts = date.match(/^2026-(\d{2})-(\d{2})$/);
+      const monthNumber = dateParts ? Number(dateParts[1]) : 0;
+      const dayNumber = dateParts ? Number(dateParts[2]) : 0;
+      const validDate = dateParts && monthNumber >= 3 && monthNumber <= 12
+        && dayNumber >= 1 && dayNumber <= new Date(2026, monthNumber, 0).getDate()
+        && date >= '2026-03-01' && date <= '2026-12-31';
+      const site = sites.find((item) => item.id === siteId);
+      if (!site || !['network', 'server'].includes(track)) {
+        showToast('Choose an available site and BCP track.');
+        return;
+      }
+      if (!validDate) {
+        showToast('Choose a valid date from March through December 2026.');
+        return;
+      }
+      const dateKey = `${track}Date`;
+      if (site[dateKey] || site[`${track}Status`] === 'Completed') {
+        showToast('That site and BCP track is no longer available to schedule.');
+        return;
+      }
+      const monthKey = `${track}Month`;
+      const monthNumberKey = `${track}MonthNum`;
+      const crqKey = `${track}CRQ`;
+      const remarksKey = `${track}Remarks`;
+      const updated = sites.map((item) => item.id === siteId ? {
+        ...item,
+        [dateKey]: date,
+        [monthKey]: months[monthNumber - 3],
+        [monthNumberKey]: monthNumber,
+        [crqKey]: String(formData.get('crq') || '').trim() || item[crqKey] || '',
+        [remarksKey]: String(formData.get('remarks') || '').trim() || item[remarksKey] || ''
+      } : item);
+      if (await saveSites(updated)) {
+        schedulingDate = null;
+        selectedDate = date;
+        calendarMonth = monthNumber - 1;
+        render();
+        showToast(`Schedule added for ${site.site} on ${date}.`);
+      }
+      return;
+    }
     if (event.target.id !== 'siteForm' || !editingSite) return;
     event.preventDefault();
     const formData = new FormData(event.target);

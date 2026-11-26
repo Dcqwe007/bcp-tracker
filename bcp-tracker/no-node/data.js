@@ -1010,55 +1010,51 @@ window.executionEvents = [
 
 window.bcpMethodOfProcedures = {
   network: {
-    title: 'Network BCP Failover Method of Procedure (MOP)',
+    title: 'Network',
     router: {
-      title: 'Network Router Failover Procedure',
-      pattern: 'LOAD BALANCED â†’ MK2 (full day) â†’ ALA (full day) â†’ back to LOAD BALANCED',
+      title: 'Network Router FO method of procedure',
+      pattern: 'LOAD BALANCED → MK2 (full day) → ALA (full day) → back to LOAD BALANCED',
       scheduleExample: [
-        { day: 'Day 1 (Sat)', action: 'LOAD BALANCED â†’ MK2 (full day)' },
-        { day: 'Day 2 (Sun)', action: 'MK2 (full day) â†’ ALA (full day)' },
-        { day: 'Day 3 (Mon)', action: 'ALA (full day) â†’ back to LOAD BALANCED' }
+        { day: 'Day 1 (Sat)', action: 'LOAD BALANCED → MK2 (full day)' },
+        { day: 'Day 2 (Sun)', action: 'MK2 (full day) → ALA (full day)' },
+        { day: 'Day 3 (Mon)', action: 'ALA (full day) → back to LOAD BALANCED' }
       ],
-      objective: 'Test tools and verify application behavior when operating on a single circuit for a full operating day.',
-      impactAssessment: 'Negligible or zero impact expected by end-users.'
+      objective: 'The objective is to test tools and understand behavior when just using a single circuit for a full day.',
+      impactAssessment: 'Negligible or no impact may be experienced.'
     },
     firewall: {
-      title: 'Firewall Failover Procedure',
-      scope: 'Global impact across sites; requires coordinated maintenance window.',
-      impactAssessment: 'Subject to pre-assessment per client account requirements.'
+      title: 'Firewall FO method of procedure',
+      scope: 'This will impact all sites and needs to be assessed further.',
+      impactAssessment: 'TBD'
     },
     coreSwitch: {
-      title: 'Core Switch Failover Procedure',
-      pattern: 'Primary Core Switch â†’ Secondary Core Switch â†’ Secondary back to Primary',
-      impactAssessment: 'Brief blip / transient packet loss during switchover.'
+      title: 'Core Switch FO method of procedure',
+      pattern: 'Primary to secondary then secondary back to primary.',
+      impactAssessment: 'Blip when switching over.'
     },
     testingChecklist: {
       preTest: [
-        'Execute Ping and Trace benchmark on Account major tools and URLs',
-        'Record baseline latency, packet loss, and jitter',
-        'Validate secondary circuit health and link negotiation status',
-        'Obtain Pre-Test authorization and sign-off from Operations'
+        'Ping and Trace on Account’s major tools to benchmark and also have comparison.',
+        'Test if all tools are working, then get sign-off from Ops.'
       ],
       postTest: [
-        'Re-run Ping and Trace on Account major tools to compare against benchmark',
-        'Verify zero routing loops or blackholed subnets',
-        'Confirm end-to-end user connectivity with site Ops Leads',
-        'Obtain final operational sign-off and close CRQ'
+        'Ping and Trace on Account’s major tools to benchmark and also have comparison.',
+        'Test if all tools are working, then get sign-off from Ops.'
       ]
     }
   },
   server: {
-    title: 'Server BCP Switching Method of Procedure (MOP)',
+    title: 'Server',
     architecture: {
-      pattern: 'Localized Server â†’ Secondary â†’ Tertiary (if applicable)',
-      adDns: 'Primary: Local Server | Secondary: MK2 Datacenter | Tertiary: ALA Datacenter',
-      dhcp: 'Primary: Local Server | Secondary: Local Standby | Tertiary: ALA Datacenter',
-      note: 'Configuration varies per site based on virtual host allocation and IP helper relay.'
+      pattern: 'Localized Server → Secondary → Tertiary (if applicable)',
+      adDns: 'AD/DNS: Primary – local / Secondary – MK2 / Tertiary – ALA',
+      dhcp: 'DHCP: Primary – local / Secondary – local / Tertiary – ALA',
+      note: 'Please note setup varies per site depending on configuration made on how the switching is defined on the servers.'
     },
     testingChecklist: [
-      { tool: 'DHCP Verification', command: 'ipconfig /all', expected: 'Verify lease offered by expected secondary/tertiary DHCP server IP.' },
-      { tool: 'DNS Resolution', command: 'nslookup [internal_domain]', expected: 'Ensure resolution binds to designated MK2 or ALA DNS servers.' },
-      { tool: 'IP Helper Relay', command: 'Network team quick check', expected: 'Confirm IP helper-address entries point to secondary DHCP scope.' }
+      { tool: 'DHCP', command: 'ipconfig', expected: 'Run ipconfig to check which DHCP is kicking in.' },
+      { tool: 'DNS', command: 'nslookup', expected: 'Run nslookup to check which DNS server the query resolves to.' },
+      { tool: 'IP helper configuration', command: 'Network Team quick check', expected: 'Do a quick check with the Network Team on the IP helper config.' }
     ]
   }
 };
